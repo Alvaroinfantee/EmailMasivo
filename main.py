@@ -1,88 +1,74 @@
 import streamlit as st
 import pandas as pd
-import yagmail
+import base64
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from io import BytesIO
 
-# Streamlit app
-def main():
-    st.title('Login Required')
-    
-    # Path to the uploaded logo
-    logo_path = 'logoPB.png'  
-    st.image(logo_path, width=600)  # Display the logo with a specific width
+# Function to authenticate and create the Gmail service
+def gmail_authenticate():
+    SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+    creds = None
+    st.session_state['creds'] = creds
+    flow = InstalledAppFlow.from_client_secrets_file(r'/Users/alvaroinfante/Downloads/client_secret_1053249236684-hg968of6qeitk4n7lua87tn2f4ea4loi.apps.googleusercontent.com.json', SCOPES)
+    creds = flow.run_local_server(port=0)
+    service = build('gmail', 'v1', credentials=creds)
+    return service
 
-    # Password input
-    password = st.text_input("Enter Password", type="password")
-    
-    # Check the password
-    if password == "0000":
-        app_body()
-    else:
-        st.warning("Incorrect Password. Please enter the correct password to proceed.")
+# Function to create and send the email
+def send_email(service, destination, code):
+    message = MIMEMultipart()
+    message['to'] = destination
+    message['subject'] = 'Your Access Code'
+    body = f"""Estimado propietario, luego de un cordial saludo nos dirigimos a usted para notificarle que con \
+el siguiente código {code} tendrá disponibles los servicios de paso rápido y acceso a invitados \
+mediante código QR. Recordar que este solo tendrá un costo de 21 dólares. Monto que solo se recibirá \
+en efectivo. Favor dirigirse a la oficina de cobro principal."""
+    message.attach(MIMEText(body, 'plain'))
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    message = {'raw': raw_message}
+    service.users().messages().send(userId='me', body=message).execute()
 
-def app_body():
-    st.title('Emails masivos para propietarios')
+# Streamlit UI
+st.title('Email Pueblo Bavaro')
 
-    sender_email = st.text_input("Sender Email", key="sender_email")
-    sender_password = st.text_input("Sender Password", type="password", key="sender_pass")
+# Authenticate with Gmail
+if 'creds' not in st.session_state:
+    st.session_state['creds'] = None
 
-    uploaded_file = st.file_uploader("Subir archivo de personas con códigos", key="personas")
-    uploaded_base_file = st.file_uploader("Subir base con emails", key="base")
-    
-    if uploaded_file is not None and uploaded_base_file is not None:
-        try:
-            personas_data = pd.read_excel(uploaded_file)
-            base_data = pd.read_excel(uploaded_base_file)
-            
-            # Check if required columns are in the uploaded files
-            expected_columns_personas = ['NOMBRE', 'APELLIDO', 'CODIGO']
-            expected_columns_base = ['NOMBRE', 'APELLIDO', 'E-MAIL PROPIETARIO']  # Adjust to actual column names
-            
-            if not all(column in personas_data.columns for column in expected_columns_personas):
-                st.error('The personas file is missing one or more required columns: NOMBRE, APELLIDO, CODIGO')
-                return
-            
-            if not all(column in base_data.columns for column in expected_columns_base):
-                st.error('The base file is missing one or more required columns: Nombre, Apellido, E-MAIL PROPIETARIO')
-                return
+if st.button('Authenticate with Gmail'):
+    st.session_state['service'] = gmail_authenticate()
 
-            # Merge and get the emails
-            merged_data = pd.merge(personas_data, base_data[['NOMBRE', 'APELLIDO', 'E-MAIL PROPIETARIO']], left_on=['NOMBRE', 'APELLIDO'], right_on=['NOMBRE', 'APELLIDO'], how='left')
-            
-            missing_emails = []  # List to hold names of people with no email found
-            results = {}
-            if st.button('Send Emails'):
-                for index, row in merged_data.iterrows():
-                    if pd.notna(row['E-MAIL PROPIETARIO']):  # Check if email exists
-                        result = send_email(row['E-MAIL PROPIETARIO'], row['CODIGO'], sender_email, sender_password)
-                        results[row['E-MAIL PROPIETARIO']] = result
-                    else:
-                        missing_emails.append(f"{row['NOMBRE']} {row['APELLIDO']}")
-                        results[f"{row['NOMBRE']} {row['APELLIDO']}"] = 'No email found'
+# File upload for matching
+st.subheader('Upload "personas con codigo" Excel file:')
+uploaded_file_personas = st.file_uploader("Choose a file", type=['xlsx'], key='personas')
 
-                st.write(results)
+st.subheader('Upload "copia base enero" Excel file:')
+uploaded_file_copia_base = st.file_uploader("Choose a file", accept_multiple_files=False, type=['xls', 'xlsx'], key='copia_base')
 
-                # Display names of people with no email found
-                if missing_emails:
-                    st.subheader('No email found for:')
-                    for name in missing_emails:
-                        st.write(name)
-        except Exception as e:
-            st.error(f'An error occurred: {e}')
+if uploaded_file_personas and uploaded_file_copia_base and 'service' in st.session_state:
+    # Process for matching
+    df_personas = pd.read_excel(uploaded_file_personas)
+    df_copia_base = pd.read_excel(uploaded_file_copia_base)
+    df_personas['FULL_NAME'] = df_personas['NOMBRE'].str.upper() + ' ' + df_personas['APELLIDOS'].str.upper()
+    df_copia_base['FULL_NAME'] = df_copia_base['NOMBRE'].str.upper() + ' ' + df_copia_base['APELLIDO'].str.upper()
+    matched_data = pd.merge(df_personas, df_copia_base[['FULL_NAME', 'E-MAIL PROPIETARIO']], on='FULL_NAME', how='left')
+    st.write(matched_data)
 
-# Function to send emails using yagmail
-def send_email(receiver_address, code, sender_email, sender_password):
-    try:
-        yag = yagmail.SMTP(user=sender_email, password=sender_password)
-        subject = 'Notificación de Servicio'
-        content = (f"Estimado propietario, luego de un cordial saludo nos dirigimos a usted para notificarle que con "
-                   f"el siguiente código {code} tendrá disponibles los servicios de paso rápido y acceso a invitados "
-                   f"mediante código QR. Recordar que este solo tendrá un costo de 21 dólares. Monto que solo se recibirá "
-                   f"en efectivo. Favor dirigirse a la oficina de cobro principal.")
-        
-        yag.send(to=receiver_address, subject=subject, contents=content)
-        return 'Mail Sent'
-    except Exception as e:
-        return f'Error: {e}'
-
-if __name__ == "__main__":
-    main()
+    # Send emails to matched data
+    no_email_list = []  # List to store names without matching emails
+    if st.button('Send Emails'):
+        for index, row in matched_data.iterrows():
+            if pd.isnull(row['E-MAIL PROPIETARIO']):
+                no_email_list.append(row['FULL_NAME'])  # Add the name to the list if no email is present
+            else:
+                send_email(st.session_state['service'], row['E-MAIL PROPIETARIO'], row['CODIGO'])
+        st.success('All possible emails sent successfully!')
+        if no_email_list:  # Check if the list is not empty
+            st.subheader('Names without matching emails:')
+            st.write(no_email_list)
+        else:
+            st.write('All names had matching emails.')
