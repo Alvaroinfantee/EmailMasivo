@@ -8,7 +8,7 @@ def main():
     
     # Path to the uploaded logo
     logo_path = 'logoPB.png'  
-    st.image(logo_path, width=200)  # Display the logo with a specific width
+    st.image(logo_path, width=600)  # Display the logo with a specific width
 
     # Password input
     password = st.text_input("Enter Password", type="password")
