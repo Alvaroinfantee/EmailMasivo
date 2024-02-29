@@ -13,7 +13,7 @@ def gmail_authenticate():
     SCOPES = ['https://www.googleapis.com/auth/gmail.send']
     creds = None
     st.session_state['creds'] = creds
-    flow = InstalledAppFlow.from_client_secrets_file(r'/Users/alvaroinfante/Downloads/client_secret_1053249236684-hg968of6qeitk4n7lua87tn2f4ea4loi.apps.googleusercontent.com.json', SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(r'client_secret_1053249236684-hg968of6qeitk4n7lua87tn2f4ea4loi.apps.googleusercontent.com.json', SCOPES)
     creds = flow.run_local_server(port=0)
     service = build('gmail', 'v1', credentials=creds)
     return service
